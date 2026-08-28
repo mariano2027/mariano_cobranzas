@@ -146,7 +146,7 @@ app.layout = dbc.Container([
                             multiple=False
                         ),
                         html.Div(id='upload-status-message', className="mt-2")
-                    ], xs=12, lg=4, className="mb-3 mb-lg-0"),
+                    ], xs=12, lg=3, className="mb-3 mb-lg-0"),
 
                     dbc.Col([
                         html.Label("Filtrar Vendedor:", className="fw-semibold text-light mb-1 small"),
@@ -157,7 +157,18 @@ app.layout = dbc.Container([
                             clearable=False,
                             style={'color': '#0f172a'}
                         )
-                    ], xs=12, lg=4, className="mb-3 mb-lg-0"),
+                    ], xs=12, lg=3, className="mb-3 mb-lg-0"),
+
+                    dbc.Col([
+                        html.Label("Filtrar Localidad:", className="fw-semibold text-light mb-1 small"),
+                        dcc.Dropdown(
+                            id='localidad-select',
+                            options=[{'label': '📍 TODAS LAS LOCALIDADES', 'value': 'TODOS'}],
+                            value='TODOS',
+                            clearable=False,
+                            style={'color': '#0f172a'}
+                        )
+                    ], xs=12, lg=3, className="mb-3 mb-lg-0"),
 
                     dbc.Col([
                         html.Label("Filtrar Cliente / Razón Social:", className="fw-semibold text-light mb-1 small"),
@@ -169,7 +180,7 @@ app.layout = dbc.Container([
                             placeholder="Escribe o selecciona cliente...",
                             style={'color': '#0f172a'}
                         )
-                    ], xs=12, lg=4)
+                    ], xs=12, lg=3)
                 ])
             ], className="p-3 exec-card")
         ], width=12, className="mb-4")
@@ -195,30 +206,33 @@ app.layout = dbc.Container([
 
 @app.callback(
     Output('vendedor-select', 'value'),
+    Output('localidad-select', 'value'),
     Output('cliente-select', 'value'),
     Input('btn-reset-filters', 'n_clicks'),
     prevent_initial_call=True
 )
 def reset_filters(n_clicks):
     if n_clicks:
-        return 'TODOS', 'TODOS'
-    return dash.no_update, dash.no_update
+        return 'TODOS', 'TODOS', 'TODOS'
+    return dash.no_update, dash.no_update, dash.no_update
 
 
 @app.callback(
     Output('stored-data', 'data'),
     Output('upload-status-message', 'children'),
     Output('vendedor-select', 'options'),
+    Output('localidad-select', 'options'),
     Output('cliente-select', 'options'),
     Input('upload-data', 'contents'),
     State('upload-data', 'filename')
 )
 def parse_excel_and_store(contents, filename):
     default_vends = [{'label': '🌐 TODOS LOS VENDEDORES', 'value': 'TODOS'}]
+    default_locs = [{'label': '📍 TODAS LAS LOCALIDADES', 'value': 'TODOS'}]
     default_clis = [{'label': '🔍 TODOS LOS CLIENTES', 'value': 'TODOS'}]
 
     if contents is None:
-        return None, dbc.Alert("Cargue la planilla Excel.", color="info", className="py-1 px-2 small mb-0"), default_vends, default_clis
+        return None, dbc.Alert("Cargue la planilla Excel.", color="info", className="py-1 px-2 small mb-0"), default_vends, default_locs, default_clis
 
     try:
         content_type, content_string = contents.split(',')
@@ -239,6 +253,17 @@ def parse_excel_and_store(contents, filename):
         else:
             df['Vendedor'] = df['Vendedor'].fillna("Vendedor General").astype(str).str.strip()
 
+        # Detección y limpieza de Localidad
+        col_localidad = next((c for c in df.columns if any(k in c.lower() for k in ['localidad', 'ciudad', 'municipio'])), None)
+        if col_localidad:
+            df['Localidad'] = df[col_localidad].fillna("Sin Localidad").astype(str).str.strip()
+            # Si el nombre de la columna original era distinto de 'Localidad', normalizamos
+            if col_localidad != 'Localidad':
+                df.drop(columns=[col_localidad], inplace=True)
+                df.rename(columns={col_localidad: 'Localidad'}, inplace=True) # por si acaso
+        else:
+            df['Localidad'] = "General"
+
         df['Cliente'] = df['Cliente'].astype(str).str.strip()
         df['Razon Social'] = df['Razon Social'].astype(str).str.strip()
 
@@ -247,13 +272,10 @@ def parse_excel_and_store(contents, filename):
 
         if 'Fecha Emisión' not in df.columns: df['Fecha Emisión'] = '-'
 
-        # Identificar columna de Importe Original / Importe
         col_importe = next((c for c in df.columns if any(k in c.lower() for k in ['importe', 'imp.', 'total'])), None)
         s_importe = clean_currency_series(df[col_importe]) if col_importe else pd.Series(0.0, index=df.index)
 
-        # Buscar cualquier columna que contenga la palabra 'saldo'
         col_saldo = next((c for c in df.columns if 'saldo' in c.lower()), None)
-
         if col_saldo:
             df['Saldo Deuda'] = clean_currency_series(df[col_saldo])
             mask_zero = (df['Saldo Deuda'] == 0) & (s_importe > 0)
@@ -270,14 +292,12 @@ def parse_excel_and_store(contents, filename):
         else:
             df['Días de Atraso'] = 0
 
-        # Identificar y limpiar Límite de Crédito
         col_limite = next((c for c in df.columns if any(k in c.lower() for k in ['limite', 'crédito', 'credito'])) , None)
         if col_limite:
             df['Limite Credito'] = clean_currency_series(df[col_limite])
         else:
             df['Limite Credito'] = 0.0
 
-        # Identificar y limpiar Días en Calle
         col_dias_calle = next((c for c in df.columns if any(k in c.lower() for k in ['dias en calle', 'días en calle', 'calle'])) , None)
         if col_dias_calle:
             df['Dias en Calle'] = pd.to_numeric(
@@ -298,6 +318,9 @@ def parse_excel_and_store(contents, filename):
         vendedores = sorted([str(v) for v in df["Vendedor"].dropna().unique() if str(v).strip() != ''])
         opts_vendedores = [{'label': '🌐 TODOS LOS VENDEDORES', 'value': 'TODOS'}] + [{'label': f"👤 {v}", 'value': v} for v in vendedores]
 
+        localidades = sorted([str(l) for l in df["Localidad"].dropna().unique() if str(l).strip() != ''])
+        opts_localidades = [{'label': '📍 TODAS LAS LOCALIDADES', 'value': 'TODOS'}] + [{'label': f"📍 {l}", 'value': l} for l in localidades]
+
         df_cli_unique = df[['Cliente', 'Razon Social']].drop_duplicates().sort_values(by='Razon Social')
         opts_clientes = [{'label': '🔍 TODOS LOS CLIENTES', 'value': 'TODOS'}]
         for _, r in df_cli_unique.iterrows():
@@ -306,10 +329,10 @@ def parse_excel_and_store(contents, filename):
             lbl = f"{cli_code} - {cli_name}" if cli_code != cli_name else cli_code
             opts_clientes.append({'label': lbl, 'value': cli_code})
 
-        return df.to_dict('records'), dbc.Alert(f"Cargado correctamente: {filename}", color="success", className="py-1 px-2 small mb-0"), opts_vendedores, opts_clientes
+        return df.to_dict('records'), dbc.Alert(f"Cargado correctamente: {filename}", color="success", className="py-1 px-2 small mb-0"), opts_vendedores, opts_localidades, opts_clientes
 
     except Exception as e:
-        return None, dbc.Alert(f"Error procesando archivo: {str(e)}", color="danger", className="py-1 px-2 small"), default_vends, default_clis
+        return None, dbc.Alert(f"Error procesando archivo: {str(e)}", color="danger", className="py-1 px-2 small"), default_vends, default_locs, default_clis
 
 
 @app.callback(
@@ -326,22 +349,30 @@ def drilldown_vendedor(clickData, current_vendedor):
     return dash.no_update
 
 
+def filtrar_dataframe(records, vendedor_sel, localidad_sel, cliente_sel):
+    if not records:
+        return pd.DataFrame()
+    df = pd.DataFrame(records)
+    if vendedor_sel and vendedor_sel != 'TODOS':
+        df = df[df["Vendedor"].astype(str) == str(vendedor_sel)]
+    if localidad_sel and localidad_sel != 'TODOS':
+        df = df[df["Localidad"].astype(str) == str(localidad_sel)]
+    if cliente_sel and cliente_sel != 'TODOS':
+        df = df[df["Cliente"].astype(str) == str(cliente_sel)]
+    return df
+
+
 @app.callback(
     Output('kpi-cards-row', 'children'),
     Input('stored-data', 'data'),
     Input('vendedor-select', 'value'),
+    Input('localidad-select', 'value'),
     Input('cliente-select', 'value')
 )
-def render_kpis(records, vendedor_sel, cliente_sel):
-    if not records:
+def render_kpis(records, vendedor_sel, localidad_sel, cliente_sel):
+    df = filtrar_dataframe(records, vendedor_sel, localidad_sel, cliente_sel)
+    if df.empty:
         return []
-
-    df = pd.DataFrame(records)
-    if vendedor_sel and vendedor_sel != 'TODOS':
-        df = df[df["Vendedor"].astype(str) == str(vendedor_sel)]
-
-    if cliente_sel and cliente_sel != 'TODOS':
-        df = df[df["Cliente"].astype(str) == str(cliente_sel)]
 
     total_cartera = df["Saldo Deuda"].sum()
     df_critico = df[df["Días de Atraso"] > 75]
@@ -399,22 +430,17 @@ def render_kpis(records, vendedor_sel, cliente_sel):
     Input('tabs-main', 'active_tab'),
     Input('stored-data', 'data'),
     Input('vendedor-select', 'value'),
+    Input('localidad-select', 'value'),
     Input('cliente-select', 'value')
 )
-def render_tab_content(active_tab, records, vendedor_sel, cliente_sel):
+def render_tab_content(active_tab, records, vendedor_sel, localidad_sel, cliente_sel):
     if not records:
         return html.Div([
             dbc.Alert("Por favor, suba una planilla de Excel para habilitar los reportes visuales.", color="dark", className="text-center py-4 border border-secondary")
         ])
 
-    df = pd.DataFrame(records)
+    df = filtrar_dataframe(records, vendedor_sel, localidad_sel, cliente_sel)
     vendedor_actual = vendedor_sel if vendedor_sel else 'TODOS'
-
-    if vendedor_actual != 'TODOS':
-        df = df[df["Vendedor"].astype(str) == str(vendedor_actual)]
-
-    if cliente_sel and cliente_sel != 'TODOS':
-        df = df[df["Cliente"].astype(str) == str(cliente_sel)]
 
     cliente_header = None
     if cliente_sel and cliente_sel != 'TODOS' and not df.empty:
@@ -575,7 +601,7 @@ def render_tab_content(active_tab, records, vendedor_sel, cliente_sel):
 
         column_defs_ranking = [
             {"field": "Cliente_Label", "headerName": "Razón Social", "filter": True, "flex": 2, "minWidth": 200},
-            {"field": "Saldo Deuda", "headerName": "Deuda Total ($)", "filter": "agNumberColumnFilter", "sortable": True, "valueFormatter": {"function": "d3.format(',.2f')(params.value)"}, "flex": 1, "minWidth": 150}
+            {"field": "Saldo Deuda", "headerName": "Deuda Total ($)", "filter": "agNumberColumnFilter", "sortable": True, "valueFormatter": {"function": "d3.format('$,.2f')(params.value)"}, "flex": 1, "minWidth": 150}
         ]
 
         return html.Div([
@@ -623,8 +649,8 @@ def render_tab_content(active_tab, records, vendedor_sel, cliente_sel):
                 "flex": 1, 
                 "minWidth": 130
             }
-            if col == "Saldo Deuda":
-                c_def["valueFormatter"] = {"function": "d3.format(',.2f')(params.value)"}
+            if col in ["Saldo Deuda", "Limite Credito"]:
+                c_def["valueFormatter"] = {"function": "d3.format('$,.2f')(params.value)"}
                 c_def["filter"] = "agNumberColumnFilter"
             elif col == "Días de Atraso":
                 c_def["filter"] = "agNumberColumnFilter"
@@ -670,8 +696,8 @@ def render_tab_content(active_tab, records, vendedor_sel, cliente_sel):
                 "flex": 1, 
                 "minWidth": 130
             }
-            if col == "Saldo Deuda":
-                c_def["valueFormatter"] = {"function": "d3.format(',.2f')(params.value)"}
+            if col in ["Saldo Deuda", "Limite Credito"]:
+                c_def["valueFormatter"] = {"function": "d3.format('$,.2f')(params.value)"}
                 c_def["filter"] = "agNumberColumnFilter"
             elif col == "Días de Atraso":
                 c_def["filter"] = "agNumberColumnFilter"
@@ -730,11 +756,11 @@ def render_tab_content(active_tab, records, vendedor_sel, cliente_sel):
         column_defs_dinamica = [
             {"field": "Cliente", "headerName": "Código Cliente", "filter": True, "sortable": True, "flex": 1, "minWidth": 130},
             {"field": "Razon Social", "headerName": "Razón Social", "filter": True, "sortable": True, "flex": 2, "minWidth": 200},
-            {"field": "Menos de 60 días", "headerName": "Menos de 60 días", "filter": "agNumberColumnFilter", "sortable": True, "valueFormatter": {"function": "d3.format(',.2f')(params.value)"}, "flex": 1, "minWidth": 140},
-            {"field": "61-75 Días", "headerName": "61-75 Días", "filter": "agNumberColumnFilter", "sortable": True, "valueFormatter": {"function": "d3.format(',.2f')(params.value)"}, "flex": 1, "minWidth": 130},
-            {"field": "76-90 Días", "headerName": "76-90 Días", "filter": "agNumberColumnFilter", "sortable": True, "valueFormatter": {"function": "d3.format(',.2f')(params.value)"}, "flex": 1, "minWidth": 130},
-            {"field": "Mayor a 90 Días", "headerName": "Mayor a 90 Días", "filter": "agNumberColumnFilter", "sortable": True, "valueFormatter": {"function": "d3.format(',.2f')(params.value)"}, "flex": 1, "minWidth": 140},
-            {"field": "Total General", "headerName": "Total General", "filter": "agNumberColumnFilter", "sortable": True, "valueFormatter": {"function": "d3.format(',.2f')(params.value)"}, "flex": 1, "minWidth": 140}
+            {"field": "Menos de 60 días", "headerName": "Menos de 60 días", "filter": "agNumberColumnFilter", "sortable": True, "valueFormatter": {"function": "d3.format('$,.2f')(params.value)"}, "flex": 1, "minWidth": 140},
+            {"field": "61-75 Días", "headerName": "61-75 Días", "filter": "agNumberColumnFilter", "sortable": True, "valueFormatter": {"function": "d3.format('$,.2f')(params.value)"}, "flex": 1, "minWidth": 130},
+            {"field": "76-90 Días", "headerName": "76-90 Días", "filter": "agNumberColumnFilter", "sortable": True, "valueFormatter": {"function": "d3.format('$,.2f')(params.value)"}, "flex": 1, "minWidth": 130},
+            {"field": "Mayor a 90 Días", "headerName": "Mayor a 90 Días", "filter": "agNumberColumnFilter", "sortable": True, "valueFormatter": {"function": "d3.format('$,.2f')(params.value)"}, "flex": 1, "minWidth": 140},
+            {"field": "Total General", "headerName": "Total General", "filter": "agNumberColumnFilter", "sortable": True, "valueFormatter": {"function": "d3.format('$,.2f')(params.value)"}, "flex": 1, "minWidth": 140}
         ]
 
         return html.Div([
@@ -770,17 +796,14 @@ def render_tab_content(active_tab, records, vendedor_sel, cliente_sel):
     Input("btn-export-criticos", "n_clicks"),
     State('stored-data', 'data'),
     State('vendedor-select', 'value'),
+    State('localidad-select', 'value'),
     State('cliente-select', 'value'),
     prevent_initial_call=True
 )
-def export_criticos(n_clicks, records, vendedor_sel, cliente_sel):
+def export_criticos(n_clicks, records, vendedor_sel, localidad_sel, cliente_sel):
     if not n_clicks or not records:
         return dash.no_update
-    df = pd.DataFrame(records)
-    if vendedor_sel and vendedor_sel != 'TODOS':
-        df = df[df["Vendedor"].astype(str) == str(vendedor_sel)]
-    if cliente_sel and cliente_sel != 'TODOS':
-        df = df[df["Cliente"].astype(str) == str(cliente_sel)]
+    df = filtrar_dataframe(records, vendedor_sel, localidad_sel, cliente_sel)
     df_crit = df[df["Días de Atraso"] > 75].sort_values(by="Días de Atraso", ascending=False)
     if df_crit.empty:
         df_crit = df
@@ -792,17 +815,14 @@ def export_criticos(n_clicks, records, vendedor_sel, cliente_sel):
     Input("btn-export-matriz", "n_clicks"),
     State('stored-data', 'data'),
     State('vendedor-select', 'value'),
+    State('localidad-select', 'value'),
     State('cliente-select', 'value'),
     prevent_initial_call=True
 )
-def export_matriz(n_clicks, records, vendedor_sel, cliente_sel):
+def export_matriz(n_clicks, records, vendedor_sel, localidad_sel, cliente_sel):
     if not n_clicks or not records:
         return dash.no_update
-    df = pd.DataFrame(records)
-    if vendedor_sel and vendedor_sel != 'TODOS':
-        df = df[df["Vendedor"].astype(str) == str(vendedor_sel)]
-    if cliente_sel and cliente_sel != 'TODOS':
-        df = df[df["Cliente"].astype(str) == str(cliente_sel)]
+    df = filtrar_dataframe(records, vendedor_sel, localidad_sel, cliente_sel)
     return dcc.send_data_frame(df.to_excel, "matriz_cuentas_corrientes.xlsx", sheet_name="Matriz", index=False)
 
 
@@ -811,17 +831,14 @@ def export_matriz(n_clicks, records, vendedor_sel, cliente_sel):
     Input("btn-export-dinamica", "n_clicks"),
     State('stored-data', 'data'),
     State('vendedor-select', 'value'),
+    State('localidad-select', 'value'),
     State('cliente-select', 'value'),
     prevent_initial_call=True
 )
-def export_dinamica(n_clicks, records, vendedor_sel, cliente_sel):
+def export_dinamica(n_clicks, records, vendedor_sel, localidad_sel, cliente_sel):
     if not n_clicks or not records:
         return dash.no_update
-    df = pd.DataFrame(records)
-    if vendedor_sel and vendedor_sel != 'TODOS':
-        df = df[df["Vendedor"].astype(str) == str(vendedor_sel)]
-    if cliente_sel and cliente_sel != 'TODOS':
-        df = df[df["Cliente"].astype(str) == str(cliente_sel)]
+    df = filtrar_dataframe(records, vendedor_sel, localidad_sel, cliente_sel)
     
     todos_tramos = ["Menos de 60 días", "61-75 Días", "76-90 Días", "Mayor a 90 Días"]
     

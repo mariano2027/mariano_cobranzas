@@ -4,3 +4,4 @@ dash-ag-grid
 pandas
 openpyxl
 plotly
+gunicorn
