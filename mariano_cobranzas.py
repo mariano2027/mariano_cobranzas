@@ -844,7 +844,7 @@ def export_dinamica(n_clicks, records, vendedor_sel, cliente_sel):
     return dcc.send_data_frame(df_pivot.to_excel, "dinamica_por_tramo.xlsx", sheet_name="Dinamica", index=False)
     
 
-    if __name__ == '__main__':
-        port = int(os.environ.get('PORT', 8080))
-        app.run(host='0.0.0.0', port=port, debug=False)
+   if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port, debug=False)
 
