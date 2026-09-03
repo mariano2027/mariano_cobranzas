@@ -718,8 +718,8 @@ def mostrar_detalle_tramo(row_click, n_cerrar, records, usuario_sesion, vendedor
             {"field": "Razon Social", "headerName": "Razón Social", "sortable": True, "filter": True, "flex": 2},
             {"field": "Vendedor", "headerName": "Vendedor", "sortable": True, "filter": True, "flex": 1},
             {"field": "Días de Atraso", "headerName": "Máx Atraso", "sortable": True, "filter": True, "width": 110},
-            {"field": "Saldo Deuda", "headerName": "Saldo Total", "sortable": True, "filter": True, "type": "rightAligned", "valueFormatter": {"function": "d3.format('$,.2f')(params.value)"}, "flex": 1}
-        ]
+            {"field": "Saldo Deuda", "headerName": "Saldo Total", "sortable": True, "filter": True, "type": "rightAligned", "valueFormatter": {"function": "d3.format('$,.2f')(params.value)"}}
+]
         
         subgrid = dag.AgGrid(
             rowData=df_filtrado_tramo.to_dict("records"),
