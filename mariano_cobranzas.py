@@ -670,3 +670,4 @@ def render_tab_content(active_tab, records, usuario_sesion, vendedor_sel, locali
 
 if __name__ == '__main__':
     app.run(debug=True)
+
