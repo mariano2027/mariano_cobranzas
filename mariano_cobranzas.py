@@ -359,6 +359,7 @@ def crear_layout_dashboard(usuario_actual):
         ])
     ], fluid=True, className="p-3 p-md-4")
 
+# Layout principal que actúa como enrutador
 app.layout = html.Div([
     dcc.Store(id='auth-store', data=None),
     html.Div(id='page-content')
@@ -530,13 +531,11 @@ def render_tab_content(active_tab, records, usuario_sesion, vendedor_sel, locali
         ])
 
     elif active_tab == "tab-zonas":
-        # Agregamos conteo de clientes únicos por Vendedor y Localidad
         df_zona = df.groupby(["Vendedor", "Localidad"], as_index=False).agg({
             "Saldo Deuda": "sum",
             "Cliente": "nunique"
         }).rename(columns={"Cliente": "Cant Clientes"})
         
-        # Filtramos saldos mayores a 0 para que el Treemap no colapse con negativos o ceros
         df_zona_plot = df_zona[df_zona["Saldo Deuda"] > 0].copy()
         
         fig_mapa = px.treemap(
@@ -655,9 +654,9 @@ def render_tab_content(active_tab, records, usuario_sesion, vendedor_sel, locali
             {"field": "Cant Clientes", "headerName": "Clientes Únicos", "sortable": True, "filter": True, "flex": 1},
             {"field": "Saldo Deuda", "headerName": "Deuda Total", "sortable": True, "filter": True, "type": "rightAligned", "valueFormatter": {"function": "d3.format('$,.2f')(params.value)"}, "flex": 1}
         ]
-
+        
         return html.Div([
-            html.H5("📈 Dinámica Agregada por Tramo (Haga clic en una fila para ver clientes)", className="text-white mb-3"),
+            html.H5("📈 Dinámica de Cartera por Tramo de Morosidad", className="text-white mb-3"),
             dag.AgGrid(
                 id="grid-dinamica",
                 rowData=df_din.to_dict("records"),
@@ -665,74 +664,9 @@ def render_tab_content(active_tab, records, usuario_sesion, vendedor_sel, locali
                 className="ag-theme-alpine-dark",
                 style={"height": "400px", "width": "100%"},
                 columnSize="sizeToFit",
-                dashGridOptions={"rowSelection": "single"}
+                dashGridOptions={"pagination": True, "paginationPageSize": 10}
             )
         ], className="p-3 exec-card")
 
-    return html.Div()
-
-@app.callback(
-    Output('vendedor-select', 'value', allow_duplicate=True),
-    Input('bar-chart-vendedor', 'clickData'),
-    State('session-usuario', 'data'),
-    State('vendedor-select', 'value'),
-    prevent_initial_call=True
-)
-def drilldown_vendedor(clickData, usuario_sesion, current_vendedor):
-    if usuario_sesion == 'Administrador' and clickData and 'points' in clickData:
-        clicked_vend = clickData['points'][0].get('y') or clickData['points'][0].get('x')
-        if clicked_vend and clicked_vend != current_vendedor:
-            return clicked_vend
-    return dash.no_update
-
-@app.callback(
-    Output("modal-tramo", "is_open"),
-    Output("modal-tramo-titulo", "children"),
-    Output("modal-tramo-contenido", "children"),
-    Input("grid-dinamica", "rowClicked"),
-    Input("btn-cerrar-modal", "n_clicks"),
-    State("stored-data", "data"),
-    State("session-usuario", "data"),
-    State("vendedor-select", "value"),
-    State("localidad-select", "value"),
-    State("cliente-select", "value"),
-    prevent_initial_call=True
-)
-def mostrar_detalle_tramo(row_click, n_cerrar, records, usuario_sesion, vendedor_sel, localidad_sel, cliente_sel):
-    trigger = ctx.triggered_id
-    if trigger == "btn-cerrar-modal":
-        return False, dash.no_update, dash.no_update
-        
-    if trigger == "grid-dinamica" and row_click:
-        tramo_seleccionado = row_click.get("data", {}).get("Tramo Morosidad")
-        if not tramo_seleccionado:
-            return dash.no_update, dash.no_update, dash.no_update
-            
-        df = filtrar_dataframe(records, usuario_sesion, vendedor_sel, localidad_sel, cliente_sel)
-        df_filtrado_tramo = df[df["Tramo Morosidad"] == tramo_seleccionado].groupby(
-            ["Cliente", "Razon Social", "Vendedor"], as_index=False
-        ).agg({"Saldo Deuda": "sum", "Días de Atraso": "max"}).sort_values(by="Saldo Deuda", ascending=False)
-        
-        columnas_subgrid = [
-            {"field": "Cliente", "headerName": "Código", "sortable": True, "filter": True, "width": 110},
-            {"field": "Razon Social", "headerName": "Razón Social", "sortable": True, "filter": True, "flex": 2},
-            {"field": "Vendedor", "headerName": "Vendedor", "sortable": True, "filter": True, "flex": 1},
-            {"field": "Días de Atraso", "headerName": "Máx Atraso", "sortable": True, "filter": True, "width": 110},
-            {"field": "Saldo Deuda", "headerName": "Saldo Total", "sortable": True, "filter": True, "type": "rightAligned", "valueFormatter": {"function": "d3.format('$,.2f')(params.value)"}}
-]
-        
-        subgrid = dag.AgGrid(
-            rowData=df_filtrado_tramo.to_dict("records"),
-            columnDefs=columnas_subgrid,
-            className="ag-theme-alpine-dark",
-            style={"height": "400px", "width": "100%"},
-            columnSize="sizeToFit",
-            dashGridOptions={"pagination": True, "paginationPageSize": 8}
-        )
-        
-        return True, f"📋 Clientes en el Tramo: {tramo_seleccionado}", subgrid
-        
-    return dash.no_update, dash.no_update, dash.no_update
-
 if __name__ == '__main__':
-    app.run(debug=True, port=8050)
+    app.run(debug=True)
